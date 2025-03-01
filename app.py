@@ -1,5 +1,7 @@
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
+from math import radians, cos, sin, asin, sqrt
+
 
 app = Flask(__name__)
 
@@ -9,6 +11,18 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize database
 db = SQLAlchemy(app)
+
+def haversine(lat1, lon1, lat2, lon2):
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    
+    # Haversine formula
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    r = 6371  # Radius of earth in kilometers
+    return c * r
 
 # User model
 class User(db.Model):
@@ -80,6 +94,11 @@ def create_tower():
     if not user:
         return jsonify({"error": "User not found"}), 404
 
+    # Make sure we aren't within 1km of an existing tower
+    for tower in Tower.query.all():
+        if haversine(tower.latitude, tower.longitude, lat, lon) < 1.0:
+            return jsonify({"error": "Tower already exists within 1km"}), 400
+
     new_tower = Tower(latitude=lat, longitude=lon, user_id=data['user_id'])
     db.session.add(new_tower)
     db.session.commit()
@@ -110,6 +129,22 @@ def create_user():
 def get_users():
     users = User.query.all()
     return jsonify([user.to_dict() for user in users]), 200
+
+# GET one user by ID
+@app.route('/users/<int:user_id>', methods=['GET'])
+def get_user(user_id):
+    user = User.query.get(user_id)
+    if user:
+        return jsonify(user.to_dict()), 200
+    return jsonify({"error": "User not found"}), 404
+
+# GET all towers for a user by User ID
+@app.route('/users/<int:user_id>/towers', methods=['GET'])
+def get_towers_by_user_id(user_id):
+    towers = Tower.query.filter_by(user_id=user_id).all()
+    result = jsonify([tower.to_dict() for tower in towers])
+    print([tower.to_dict() for tower in towers])
+    return result, 200
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
